@@ -3,9 +3,7 @@ const axios = require("axios");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 
 const accessToken = process.env.ACCESS_TOKEN;
-const query =
-  process.argv[2] ||
-  "Refil Compatível Soft Everest Star Slim Fit Plus Baby Cor Branco";
+const query = process.argv[2];
 const apiUrl = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(
   query
 )}`;
