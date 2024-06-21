@@ -10,6 +10,15 @@ const apiUrl = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURICompo
   query
 )}`;
 
+const priceRanges = [
+  { min: 0, max: 50 },
+  { min: 51, max: 100 },
+  { min: 101, max: 200 },
+  { min: 201, max: 500 },
+  { min: 501, max: 1000 },
+  { min: 1001, max: 5000 },
+];
+
 const csvWriter = createCsvWriter({
   path: "results.csv",
   header: [
@@ -35,14 +44,14 @@ const csvWriter = createCsvWriter({
   ],
 });
 
-async function fetchItems(offset = 0, items = []) {
+async function fetchItems(url, offset = 0, items = []) {
   if (offset >= 1000) {
     console.log("Reached maximum allowed offset for public users");
     return items;
   }
 
   try {
-    const response = await axios.get(`${apiUrl}&offset=${offset}&limit=50`, {
+    const response = await axios.get(`${url}&offset=${offset}&limit=50`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -99,7 +108,7 @@ async function fetchItems(offset = 0, items = []) {
       });
 
       if (data.paging.total > offset + 50 && offset + 50 < 1000) {
-        return fetchItems(offset + 50, items);
+        return fetchItems(url, offset + 50, items);
       }
     } else {
       console.error("No results found or data format unexpected:", data);
@@ -116,11 +125,16 @@ async function fetchItems(offset = 0, items = []) {
 }
 
 async function main() {
-  console.log("Fetching data from Mercado Livre...");
-  const items = await fetchItems();
+  let allItems = [];
+  for (const range of priceRanges) {
+    console.log(`Fetching data for price range ${range.min} - ${range.max}`);
+    const url = `${apiUrl}&price=${range.min}-${range.max}`;
+    const items = await fetchItems(url);
+    allItems = allItems.concat(items);
+  }
 
-  if (items && items.length > 0) {
-    await csvWriter.writeRecords(items);
+  if (allItems.length > 0) {
+    await csvWriter.writeRecords(allItems);
     console.log("Data saved to results.csv");
   } else {
     console.log("No data found");
