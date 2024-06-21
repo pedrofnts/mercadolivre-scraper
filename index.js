@@ -36,6 +36,11 @@ const csvWriter = createCsvWriter({
 });
 
 async function fetchItems(offset = 0, items = []) {
+  if (offset >= 1000) {
+    console.log("Reached maximum allowed offset for public users");
+    return items;
+  }
+
   try {
     const response = await axios.get(`${apiUrl}&offset=${offset}&limit=50`, {
       headers: {
@@ -44,56 +49,60 @@ async function fetchItems(offset = 0, items = []) {
     });
 
     const data = response.data;
-    data.results.forEach((item) => {
-      const attributes = {
-        brand: { id: null, value_name: null },
-        units_per_pack: { id: null, value_name: null },
-        gtin: { id: null, value_name: null },
-      };
+    if (data.results) {
+      data.results.forEach((item) => {
+        const attributes = {
+          brand: { id: null, value_name: null },
+          units_per_pack: { id: null, value_name: null },
+          gtin: { id: null, value_name: null },
+        };
 
-      item.attributes.forEach((attr) => {
-        if (attr.id === "BRAND") attributes.brand = attr;
-        if (attr.id === "UNITS_PER_PACK") attributes.units_per_pack = attr;
-        if (attr.id === "GTIN") attributes.gtin = attr;
+        item.attributes.forEach((attr) => {
+          if (attr.id === "BRAND") attributes.brand = attr;
+          if (attr.id === "UNITS_PER_PACK") attributes.units_per_pack = attr;
+          if (attr.id === "GTIN") attributes.gtin = attr;
+        });
+
+        const seller = item.seller
+          ? { id: item.seller.id, nickname: item.seller.nickname }
+          : { id: null, nickname: null };
+        const installments = item.installments
+          ? {
+              quantity: item.installments.quantity,
+              amount: item.installments.amount,
+              rate: item.installments.rate,
+              currency_id: item.installments.currency_id,
+            }
+          : { quantity: null, amount: null, rate: null, currency_id: null };
+
+        items.push({
+          id: item.id,
+          title: item.title,
+          price: item.price,
+          currency_id: item.currency_id,
+          available_quantity: item.available_quantity,
+          sold_quantity: item.sold_quantity,
+          permalink: item.permalink,
+          brand_id: attributes.brand.id,
+          brand_value: attributes.brand.value_name,
+          units_per_pack_id: attributes.units_per_pack.id,
+          units_per_pack_value: attributes.units_per_pack.value_name,
+          gtin_id: attributes.gtin.id,
+          gtin_value: attributes.gtin.value_name,
+          seller_id: seller.id,
+          seller_nickname: seller.nickname,
+          installments_quantity: installments.quantity,
+          installments_amount: installments.amount,
+          installments_rate: installments.rate,
+          installments_currency_id: installments.currency_id,
+        });
       });
 
-      const seller = item.seller
-        ? { id: item.seller.id, nickname: item.seller.nickname }
-        : { id: null, nickname: null };
-      const installments = item.installments
-        ? {
-            quantity: item.installments.quantity,
-            amount: item.installments.amount,
-            rate: item.installments.rate,
-            currency_id: item.installments.currency_id,
-          }
-        : { quantity: null, amount: null, rate: null, currency_id: null };
-
-      items.push({
-        id: item.id,
-        title: item.title,
-        price: item.price,
-        currency_id: item.currency_id,
-        available_quantity: item.available_quantity,
-        sold_quantity: item.sold_quantity,
-        permalink: item.permalink,
-        brand_id: attributes.brand.id,
-        brand_value: attributes.brand.value_name,
-        units_per_pack_id: attributes.units_per_pack.id,
-        units_per_pack_value: attributes.units_per_pack.value_name,
-        gtin_id: attributes.gtin.id,
-        gtin_value: attributes.gtin.value_name,
-        seller_id: seller.id,
-        seller_nickname: seller.nickname,
-        installments_quantity: installments.quantity,
-        installments_amount: installments.amount,
-        installments_rate: installments.rate,
-        installments_currency_id: installments.currency_id,
-      });
-    });
-
-    if (data.paging.total > offset + 50) {
-      return fetchItems(offset + 50, items);
+      if (data.paging.total > offset + 50 && offset + 50 < 1000) {
+        return fetchItems(offset + 50, items);
+      }
+    } else {
+      console.error("No results found or data format unexpected:", data);
     }
 
     return items;
@@ -102,6 +111,7 @@ async function fetchItems(offset = 0, items = []) {
       "Error fetching data:",
       error.response ? error.response.data : error.message
     );
+    return items;
   }
 }
 
@@ -109,7 +119,7 @@ async function main() {
   console.log("Fetching data from Mercado Livre...");
   const items = await fetchItems();
 
-  if (items.length > 0) {
+  if (items && items.length > 0) {
     await csvWriter.writeRecords(items);
     console.log("Data saved to results.csv");
   } else {
