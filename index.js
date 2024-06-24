@@ -131,24 +131,52 @@ async function fetchAdditionalInfo(items) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1920, height: 1080 });
 
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    if (["image", "font"].indexOf(request.resourceType()) !== -1)
+      request.abort();
+    else request.continue();
+  });
+
   for (let item of items) {
     try {
       await page.goto(item.permalink, { waitUntil: "networkidle2" });
 
-      await page.waitForSelector(".ui-pdp-review__rating", { timeout: 5000 });
-      const rating = await page.$eval(".ui-pdp-review__rating", (el) =>
-        el.textContent.trim()
-      );
+      let rating = null;
+      try {
+        await page.waitForSelector(".ui-pdp-review__rating", { timeout: 5000 });
+        rating = await page.$eval(".ui-pdp-review__rating", (el) =>
+          el.textContent.trim()
+        );
+      } catch {
+        console.log(
+          `Rating not found for product ${item.id} (${item.permalink})`
+        );
+      }
 
-      await page.waitForSelector(".ui-pdp-review__amount", { timeout: 5000 });
-      const reviewCount = await page.$eval(".ui-pdp-review__amount", (el) =>
-        el.textContent.trim()
-      );
+      let reviewCount = null;
+      try {
+        await page.waitForSelector(".ui-pdp-review__amount", { timeout: 5000 });
+        reviewCount = await page.$eval(".ui-pdp-review__amount", (el) =>
+          el.textContent.trim()
+        );
+      } catch {
+        console.log(
+          `Review count not found for product ${item.id} (${item.permalink})`
+        );
+      }
 
-      await page.waitForSelector(".ui-pdp-subtitle", { timeout: 5000 });
-      const salesNumber = await page.$eval(".ui-pdp-subtitle", (el) =>
-        el.textContent.trim()
-      );
+      let salesNumber = null;
+      try {
+        await page.waitForSelector(".ui-pdp-subtitle", { timeout: 5000 });
+        salesNumber = await page.$eval(".ui-pdp-subtitle", (el) =>
+          el.textContent.trim()
+        );
+      } catch {
+        console.log(
+          `Sales number not found for product ${item.id} (${item.permalink})`
+        );
+      }
 
       item.rating = rating;
       item.review_count = reviewCount;
