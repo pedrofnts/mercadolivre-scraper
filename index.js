@@ -1,12 +1,13 @@
 require("dotenv").config();
 const axios = require("axios");
+const fs = require("fs");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
-const puppeteer = require("puppeteer");
 
 const accessToken = process.env.ACCESS_TOKEN;
 const query =
   process.argv[2] ||
   "Refil Compatível Soft Everest Star Slim Fit Plus Baby Cor Branco";
+const fileName = process.argv[3] || "results.csv";
 const apiUrl = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(
   query
 )}`;
@@ -21,7 +22,7 @@ const priceRanges = [
 ];
 
 const csvWriter = createCsvWriter({
-  path: "results.csv",
+  path: fileName,
   header: [
     { id: "id", title: "ID" },
     { id: "title", title: "Title" },
@@ -39,10 +40,8 @@ const csvWriter = createCsvWriter({
     { id: "installments_amount", title: "Installments Amount" },
     { id: "installments_rate", title: "Installments Rate" },
     { id: "installments_currency_id", title: "Installments Currency ID" },
-    { id: "rating", title: "Rating" },
-    { id: "review_count", title: "Review Count" },
-    { id: "sales_number", title: "Sales Number" },
   ],
+  append: true, // Append to the existing CSV file
 });
 
 async function fetchItems(url, offset = 0, items = []) {
@@ -123,95 +122,17 @@ async function fetchItems(url, offset = 0, items = []) {
   }
 }
 
-async function fetchAdditionalInfo(items) {
-  const browser = await puppeteer.launch({
-    headless: false,
-    args: ["--start-maximized"],
-  });
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1920, height: 1080 });
-
-  await page.setRequestInterception(true);
-  page.on("request", (request) => {
-    if (["image", "font"].indexOf(request.resourceType()) !== -1)
-      request.abort();
-    else request.continue();
-  });
-
-  for (let item of items) {
-    try {
-      await page.goto(item.permalink, { waitUntil: "networkidle2" });
-
-      let rating = null;
-      try {
-        await page.waitForSelector(".ui-pdp-review__rating", { timeout: 5000 });
-        rating = await page.$eval(".ui-pdp-review__rating", (el) =>
-          el.textContent.trim()
-        );
-      } catch {
-        console.log(
-          `Rating not found for product ${item.id} (${item.permalink})`
-        );
-      }
-
-      let reviewCount = null;
-      try {
-        await page.waitForSelector(".ui-pdp-review__amount", { timeout: 5000 });
-        reviewCount = await page.$eval(".ui-pdp-review__amount", (el) =>
-          el.textContent.trim()
-        );
-      } catch {
-        console.log(
-          `Review count not found for product ${item.id} (${item.permalink})`
-        );
-      }
-
-      let salesNumber = null;
-      try {
-        await page.waitForSelector(".ui-pdp-subtitle", { timeout: 5000 });
-        salesNumber = await page.$eval(".ui-pdp-subtitle", (el) =>
-          el.textContent.trim()
-        );
-      } catch {
-        console.log(
-          `Sales number not found for product ${item.id} (${item.permalink})`
-        );
-      }
-
-      item.rating = rating;
-      item.review_count = reviewCount;
-      item.sales_number = salesNumber;
-    } catch (error) {
-      console.error(
-        `Error fetching additional info for ${item.permalink}:`,
-        error
-      );
-      item.rating = null;
-      item.review_count = null;
-      item.sales_number = null;
-    }
-  }
-
-  await browser.close();
-  return items;
-}
-
 async function main() {
-  let allItems = [];
   for (const range of priceRanges) {
     console.log(`Fetching data for price range ${range.min} - ${range.max}`);
     const url = `${apiUrl}&price=${range.min}-${range.max}`;
     const items = await fetchItems(url);
-    allItems = allItems.concat(items);
-  }
-
-  if (allItems.length > 0) {
-    console.log("Fetching additional info from product pages...");
-    const itemsWithAdditionalInfo = await fetchAdditionalInfo(allItems);
-    await csvWriter.writeRecords(itemsWithAdditionalInfo);
-    console.log("Data saved to results.csv");
-  } else {
-    console.log("No data found");
+    if (items.length > 0) {
+      await csvWriter.writeRecords(items);
+      console.log(
+        `Data for price range ${range.min} - ${range.max} saved to ${fileName}`
+      );
+    }
   }
 }
 
