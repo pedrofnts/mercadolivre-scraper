@@ -1,6 +1,7 @@
 require("dotenv").config();
 const axios = require("axios");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+const puppeteer = require("puppeteer");
 
 const accessToken = process.env.ACCESS_TOKEN;
 const query =
@@ -29,18 +30,18 @@ const csvWriter = createCsvWriter({
     { id: "available_quantity", title: "Available Quantity" },
     { id: "sold_quantity", title: "Sold Quantity" },
     { id: "permalink", title: "Permalink" },
-    { id: "brand_id", title: "Brand ID" },
-    { id: "brand_value", title: "Brand Value" },
-    { id: "units_per_pack_id", title: "Units per Pack ID" },
-    { id: "units_per_pack_value", title: "Units per Pack Value" },
-    { id: "gtin_id", title: "GTIN ID" },
-    { id: "gtin_value", title: "GTIN Value" },
+    { id: "brand_value", title: "Brand" },
+    { id: "units_per_pack_value", title: "Units per Pack" },
+    { id: "gtin_value", title: "GTIN" },
     { id: "seller_id", title: "Seller ID" },
     { id: "seller_nickname", title: "Seller Nickname" },
     { id: "installments_quantity", title: "Installments Quantity" },
     { id: "installments_amount", title: "Installments Amount" },
     { id: "installments_rate", title: "Installments Rate" },
     { id: "installments_currency_id", title: "Installments Currency ID" },
+    { id: "rating", title: "Rating" },
+    { id: "review_count", title: "Review Count" },
+    { id: "sales_number", title: "Sales Number" },
   ],
 });
 
@@ -61,15 +62,16 @@ async function fetchItems(url, offset = 0, items = []) {
     if (data.results) {
       data.results.forEach((item) => {
         const attributes = {
-          brand: { id: null, value_name: null },
-          units_per_pack: { id: null, value_name: null },
-          gtin: { id: null, value_name: null },
+          brand: null,
+          units_per_pack: null,
+          gtin: null,
         };
 
         item.attributes.forEach((attr) => {
-          if (attr.id === "BRAND") attributes.brand = attr;
-          if (attr.id === "UNITS_PER_PACK") attributes.units_per_pack = attr;
-          if (attr.id === "GTIN") attributes.gtin = attr;
+          if (attr.id === "BRAND") attributes.brand = attr.value_name;
+          if (attr.id === "UNITS_PER_PACK")
+            attributes.units_per_pack = attr.value_name;
+          if (attr.id === "GTIN") attributes.gtin = attr.value_name;
         });
 
         const seller = item.seller
@@ -92,12 +94,9 @@ async function fetchItems(url, offset = 0, items = []) {
           available_quantity: item.available_quantity,
           sold_quantity: item.sold_quantity,
           permalink: item.permalink,
-          brand_id: attributes.brand.id,
-          brand_value: attributes.brand.value_name,
-          units_per_pack_id: attributes.units_per_pack.id,
-          units_per_pack_value: attributes.units_per_pack.value_name,
-          gtin_id: attributes.gtin.id,
-          gtin_value: attributes.gtin.value_name,
+          brand_value: attributes.brand,
+          units_per_pack_value: attributes.units_per_pack,
+          gtin_value: attributes.gtin,
           seller_id: seller.id,
           seller_nickname: seller.nickname,
           installments_quantity: installments.quantity,
@@ -107,7 +106,7 @@ async function fetchItems(url, offset = 0, items = []) {
         });
       });
 
-      if (data.paging.total > offset + 50 && offset + 50 < 1000) {
+      if (data.paging.total > offset + 50) {
         return fetchItems(url, offset + 50, items);
       }
     } else {
@@ -124,6 +123,51 @@ async function fetchItems(url, offset = 0, items = []) {
   }
 }
 
+async function fetchAdditionalInfo(items) {
+  const browser = await puppeteer.launch({
+    headless: false,
+    args: ["--start-maximized"],
+  });
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1920, height: 1080 });
+
+  for (let item of items) {
+    try {
+      await page.goto(item.permalink, { waitUntil: "networkidle2" });
+
+      await page.waitForSelector(".ui-pdp-review__rating", { timeout: 5000 });
+      const rating = await page.$eval(".ui-pdp-review__rating", (el) =>
+        el.textContent.trim()
+      );
+
+      await page.waitForSelector(".ui-pdp-review__amount", { timeout: 5000 });
+      const reviewCount = await page.$eval(".ui-pdp-review__amount", (el) =>
+        el.textContent.trim()
+      );
+
+      await page.waitForSelector(".ui-pdp-subtitle", { timeout: 5000 });
+      const salesNumber = await page.$eval(".ui-pdp-subtitle", (el) =>
+        el.textContent.trim()
+      );
+
+      item.rating = rating;
+      item.review_count = reviewCount;
+      item.sales_number = salesNumber;
+    } catch (error) {
+      console.error(
+        `Error fetching additional info for ${item.permalink}:`,
+        error
+      );
+      item.rating = null;
+      item.review_count = null;
+      item.sales_number = null;
+    }
+  }
+
+  await browser.close();
+  return items;
+}
+
 async function main() {
   let allItems = [];
   for (const range of priceRanges) {
@@ -134,7 +178,9 @@ async function main() {
   }
 
   if (allItems.length > 0) {
-    await csvWriter.writeRecords(allItems);
+    console.log("Fetching additional info from product pages...");
+    const itemsWithAdditionalInfo = await fetchAdditionalInfo(allItems);
+    await csvWriter.writeRecords(itemsWithAdditionalInfo);
     console.log("Data saved to results.csv");
   } else {
     console.log("No data found");
